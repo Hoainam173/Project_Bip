@@ -8,6 +8,9 @@ from ultralytics import YOLO
 import time
 import pygame
 import torch
+import streamlit as st
+import numpy as np
+from ultralytics import YOLO
 
 # Initialize pygame to play the alert sound
 pygame.mixer.init()
@@ -19,42 +22,35 @@ if torch.cuda.is_available():
     model.to('cuda')
 classnames = model.names
 
-# GUI setup
-root = tk.Tk()
-root.title("Real-Time Fall Detection")
-root.geometry("800x600")
-
-label_video = tk.Label(root)
-label_video.pack()
-
-label_warning = tk.Label(root, text="", font=("Arial", 24), fg="red")
-label_warning.pack(pady=10)
-
-status_bar = tk.Label(root, text="Monitoring...", bd=1, relief=tk.SUNKEN, anchor=tk.W)
-status_bar.pack(side=tk.BOTTOM, fill=tk.X)
-
 # Use webcam (0 = default camera)
 cap = cv2.VideoCapture(0)
 cap.set(3, 640)
 cap.set(4, 480)
 
+# Streamlit app title and sidebar
+st.title("Real-Time Fall Detection")
+st.sidebar.header("Control Panel")
+st.sidebar.text("This application detects falls in real-time using YOLOv8.")
+
+# Initialize variables
 prev_time = 0
 fall_timer = 0
 frame_skip = 1
 frame_count = 0
 
-def process_frame():
-    global prev_time, fall_timer, frame_count
+# Create a placeholder for the video feed
+video_placeholder = st.empty()
 
+# Start the video capture and processing loop
+while True:
     ret, frame = cap.read()
     if not ret:
-        status_bar.config(text="Camera not detected or disconnected.")
-        return
+        st.error("Camera not detected or disconnected.")
+        break
 
     frame_count += 1
     if frame_count % frame_skip != 0:
-        root.after(1, process_frame)
-        return
+        continue
 
     frame = cv2.resize(frame, (640, 480))
     results = model(frame, verbose=False)
@@ -90,30 +86,25 @@ def process_frame():
     curr_time = time.time()
     fps = 1 / (curr_time - prev_time) if prev_time else 0
     prev_time = curr_time
-    cv2.putText(frame, f'FPS: {int(fps)}', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
 
     if fall_detected:
-        label_warning.config(text="FALL DETECTED")
-        status_bar.config(text="Warning: Fall detected!")
         if time.time() - fall_timer > 5:
             pygame.mixer.Sound.play(alert_sound)
             fall_timer = time.time()
-    else:
-        label_warning.config(text="")
-        status_bar.config(text="Monitoring...")
 
+    # Convert frame to RGB for Streamlit
     img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    img_pil = Image.fromarray(img_rgb)
-    img_tk = ImageTk.PhotoImage(image=img_pil)
+    img_rgb = np.array(img_rgb)
 
-    label_video.imgtk = img_tk
-    label_video.configure(image=img_tk)
+    # Update Streamlit display
+    video_placeholder.image(img_rgb, channels="RGB", use_column_width=True)
+    if fall_detected:
+        st.warning("FALL DETECTED")
+    else:
+        st.success("Monitoring...")
 
-    root.after(10, process_frame)
+    # Add a small delay to control the frame rate
+    time.sleep(0.1)
 
-# Start real-time processing
-threading.Thread(target=process_frame).start()
-
-root.mainloop()
+# Release the video capture when done
 cap.release()
-cv2.destroyAllWindows()
